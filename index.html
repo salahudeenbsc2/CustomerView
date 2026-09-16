@@ -5450,13 +5450,88 @@
             };
         }
 
+        async function resolveCustomerCanonicalProduct(selectedProductId, cachedProduct = null) {
+            const numericId = Number(selectedProductId);
+            if (Number.isFinite(numericId) && numericId > 0) {
+                const direct = await supabaseClient
+                    .from('customer_products')
+                    .select('*')
+                    .eq('id', numericId)
+                    .maybeSingle();
+                if (!direct.error && direct.data?.id != null) {
+                    return { id: Number(direct.data.id), product: direct.data, remapped: false };
+                }
+            }
+
+            // Historical browser products may still carry IDs such as 16/19.
+            // Resolve them only through the public Supabase product view.
+            const allResult = await supabaseClient.from('customer_products').select('*');
+            if (allResult.error) throw allResult.error;
+            const rows = allResult.data || [];
+            const sku = String(cachedProduct?.sku || '').trim().toLowerCase();
+            const name = String(cachedProduct?.name || '').trim().toLowerCase();
+            const brand = String(cachedProduct?.brand || '').trim().toLowerCase();
+            const category = String(cachedProduct?.category || '').trim().toLowerCase();
+
+            let matches = sku
+                ? rows.filter(row => String(row.sku || '').trim().toLowerCase() === sku)
+                : [];
+            if (matches.length !== 1 && name) {
+                matches = rows.filter(row =>
+                    String(row.name || '').trim().toLowerCase() === name &&
+                    (!brand || String(row.brand || '').trim().toLowerCase() === brand) &&
+                    (!category || String(row.category || '').trim().toLowerCase() === category)
+                );
+            }
+            if (matches.length !== 1) {
+                throw new Error(matches.length > 1
+                    ? 'More than one product matches. Give every product a unique SKU.'
+                    : `Product ${selectedProductId} was not found in Supabase.`);
+            }
+            return {
+                id: Number(matches[0].id),
+                product: matches[0],
+                remapped: String(matches[0].id) !== String(selectedProductId)
+            };
+        }
+
+        function normalizeFetchedProductBenefits(source) {
+            const value = source || {};
+            const returnEnabled = productServiceSwitch(
+                value.return_enabled ?? value.returnEnabled ?? value.returnable
+            );
+            const replacementEnabled = productServiceSwitch(
+                value.replacement_enabled ?? value.replacementEnabled ?? value.replace_enabled
+            );
+            const warrantyEnabled = productServiceSwitch(
+                value.warranty_enabled ?? value.warranty_available ?? value.warrantyEnabled
+            );
+            return {
+                ...emptyProductBenefitsServices(),
+                free_delivery: productServiceSwitch(value.free_delivery ?? value.freeDelivery),
+                return_enabled: returnEnabled,
+                return_days: returnEnabled ? Math.max(1, Number(value.return_days ?? value.returnDays) || 7) : 0,
+                replacement_enabled: replacementEnabled,
+                replacement_days: replacementEnabled
+                    ? Math.max(1, Number(value.replacement_days ?? value.replacementDays) || 7) : 0,
+                warranty_enabled: warrantyEnabled,
+                warranty_available: warrantyEnabled,
+                warranty_text: warrantyEnabled
+                    ? String(value.warranty_text ?? value.warrantyText ?? '').trim() : '',
+                secure_payment: productServiceSwitch(value.secure_payment ?? value.securePayment),
+                cash_on_delivery: productServiceSwitch(value.cash_on_delivery ?? value.cashOnDelivery),
+                updated_at: value.updated_at || null
+            };
+        }
+
         async function loadProductWithBenefits(selectedProductId) {
             const cachedProduct = productsCache.find(
                 product => String(product.id) === String(selectedProductId)
             ) || null;
 
-            const productId = Number(selectedProductId);
-            const productIdText = String(selectedProductId);
+            const canonical = await resolveCustomerCanonicalProduct(selectedProductId, cachedProduct);
+            const productId = Number(canonical.id);
+            const productIdText = String(canonical.id);
             const [productResult, benefitsResult, benefitsViewResult, benefitsRpcResult] = await Promise.all([
                 supabaseClient
                     .from('products')
@@ -5506,12 +5581,9 @@
             // fallbacks for installations that expose the customer-facing
             // database helpers. Do not merge multiple rows: an older fallback
             // must never turn a newly-disabled option back on.
-            const benefits = directBenefits || benefitsRpc || benefitsView || productResult.data || null;
+            const benefits = directBenefits || benefitsRpc || benefitsView || productResult.data || canonical.product || null;
             const hasBenefits = Boolean(benefits);
-            const normalizedBenefits = {
-                ...emptyProductBenefitsServices(),
-                ...(hasBenefits ? benefits : {})
-            };
+            const normalizedBenefits = normalizeFetchedProductBenefits(benefits);
             // Older product rows used warranty_available while the dedicated
             // Benefits table uses warranty_enabled. Preserve that compatible
             // alias so an enabled warranty can never disappear at render time.
@@ -5527,7 +5599,9 @@
 
             return mapCustomerProduct({
                 ...(cachedProduct || {}),
+                ...(canonical.product || {}),
                 ...product,
+                id: productId,
                 ...normalizedBenefits,
                 product_benefits_services: hasBenefits ? [normalizedBenefits] : []
             });
@@ -5549,6 +5623,15 @@
                 return true;
             } catch (error) {
                 console.error('Open product Benefits refresh failed:', error);
+                const section = document.getElementById('productBenefitsServices');
+                const grid = document.getElementById('product-benefits-list');
+                if (section && grid && productModal.classList.contains('active')) {
+                    section.hidden = false;
+                    grid.innerHTML = `<div class="product-benefit-service-item">
+                        <i class="fas fa-circle-exclamation" aria-hidden="true"></i>
+                        <span><strong>Benefits could not be loaded</strong><small>${escapeHtml(error.message || 'Please refresh and try again.')}</small></span>
+                    </div>`;
+                }
                 return false;
             }
         }
