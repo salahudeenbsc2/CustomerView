@@ -1772,7 +1772,8 @@
             min-width: 0;
             padding: 24px 0 50px;
         }
-        #productModal .modal-img {
+        #productModal .modal-img,
+        #productModal .modal-video {
             height: min(62vh, 590px);
             min-height: 390px;
             background: #fafafa;
@@ -1842,6 +1843,13 @@
             will-change: transform, opacity;
             user-select: none;
             -webkit-user-drag: none;
+        }
+        .modal-video {
+            width: 100%;
+            height: 280px;
+            object-fit: contain;
+            border-radius: 16px;
+            background: #0f172a;
         }
         .modal-img.is-dragging {
             transition: none;
@@ -1992,6 +2000,7 @@
             100% { transform: scale(1); opacity: 1; }
         }
         .modal-thumb {
+            position: relative;
             width: 100%;
             flex: 0 0 auto;
             height: 64px;
@@ -2016,6 +2025,29 @@
             height: 100%;
             object-fit: cover;
             border-radius: 6px;
+        }
+        .modal-thumb video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 6px;
+            pointer-events: none;
+        }
+        .modal-thumb.video-thumb::after {
+            content: '\25B6';
+            position: absolute;
+            inset: 50% auto auto 50%;
+            transform: translate(-50%, -50%);
+            width: 24px;
+            height: 24px;
+            display: grid;
+            place-items: center;
+            border-radius: 50%;
+            background: rgba(0, 0, 0, 0.68);
+            color: #fff;
+            font-size: 10px;
+            line-height: 1;
+            pointer-events: none;
         }
         .modal-thumb.empty {
             color: #aaa;
@@ -3815,7 +3847,8 @@
             .product-info-column {
                 padding: 8px 0 30px;
             }
-            #productModal .modal-img {
+            #productModal .modal-img,
+            #productModal .modal-video {
                 height: min(52vh, 460px);
                 min-height: 280px;
             }
@@ -3933,7 +3966,8 @@
                 font-size: 11px;
                 white-space: nowrap;
             }
-            #productModal .modal-img { height: 280px; min-height: 220px; }
+            #productModal .modal-img,
+            #productModal .modal-video { height: 280px; min-height: 220px; }
             .modal-thumb { height: 50px; }
             .modal-action-row { grid-template-columns: 1fr; }
             .product-benefits-services-grid { grid-template-columns: 1fr; }
@@ -4094,6 +4128,7 @@
                 <div class="modal-main-image">
                     <button type="button" class="modal-image-nav prev" id="modalPrevImage" onclick="changeModalImage(-1)" aria-label="Previous image"><i class="fas fa-chevron-left"></i></button>
                     <img class="modal-img" id="modalImage" src="" alt="Product" />
+                    <video class="modal-video" id="modalVideo" controls playsinline preload="metadata" hidden></video>
                     <span class="modal-zoom-lens" id="modalZoomLens" aria-hidden="true"></span>
                     <button type="button" class="modal-image-nav next" id="modalNextImage" onclick="changeModalImage(1)" aria-label="Next image"><i class="fas fa-chevron-right"></i></button>
                     <span class="modal-image-count" id="modalImageCount">1 / 1</span>
@@ -4557,11 +4592,25 @@
             return [trimmed];
         }
 
+        function isProductVideoUrl(value) {
+            const url = String(value || '').trim().toLowerCase();
+            if (!url) return false;
+            if (url.startsWith('data:video/')) return true;
+            const cleanUrl = url.split(/[?#]/, 1)[0];
+            return /\.(mp4|webm|ogg|ogv|mov|m4v)$/.test(cleanUrl);
+        }
+
+        function firstProductImageUrl(values) {
+            return (Array.isArray(values) ? values : []).find(value => !isProductVideoUrl(value)) || '';
+        }
+
         function mapCustomerProduct(row) {
             const images = normalizeProductImages(row.images);
-            const primaryImage = (typeof row.image === 'string' && row.image.trim()) ? row.image.trim() :
-                (images[0] || PRODUCT_IMAGE_PLACEHOLDER);
-            if (primaryImage !== PRODUCT_IMAGE_PLACEHOLDER && !images.includes(primaryImage)) images.unshift(primaryImage);
+            const explicitPrimary = (typeof row.image === 'string' && row.image.trim()) ? row.image.trim() : '';
+            if (explicitPrimary && explicitPrimary !== PRODUCT_IMAGE_PLACEHOLDER && !images.includes(explicitPrimary)) {
+                images.unshift(explicitPrimary);
+            }
+            const primaryImage = firstProductImageUrl(images) || PRODUCT_IMAGE_PLACEHOLDER;
 
             const stockQty = productNumber(row.stockQty ?? row.stock, 0);
             return {
@@ -6638,7 +6687,7 @@
             const lens = document.getElementById('modalZoomLens');
             const pane = document.getElementById('modalImageZoomPane');
             const zoomImage = document.getElementById('modalZoomImage');
-            if (!sourceImage || !lens || !pane || !zoomImage || !sourceImage.complete) return;
+            if (!sourceImage || sourceImage.hidden || !lens || !pane || !zoomImage || !sourceImage.complete) return;
 
             const rect = sourceImage.getBoundingClientRect();
             const gap = 12;
@@ -6681,14 +6730,39 @@
         function renderModalGallery() {
             const imageCount = currentModalImages.length;
             const mainImage = document.getElementById('modalImage');
+            const mainVideo = document.getElementById('modalVideo');
             const activeImage = imageCount ? currentModalImages[currentModalImageIndex] : PRODUCT_IMAGE_PLACEHOLDER;
-            mainImage.onerror = function() {
-                this.onerror = null;
-                this.src = PRODUCT_IMAGE_PLACEHOLDER;
-                syncModalZoomImage(PRODUCT_IMAGE_PLACEHOLDER);
-            };
-            mainImage.src = activeImage;
-            syncModalZoomImage(activeImage);
+            const activeIsVideo = imageCount > 0 && isProductVideoUrl(activeImage);
+
+            if (activeIsVideo) {
+                hideModalImageZoom();
+                mainImage.hidden = true;
+                mainVideo.hidden = false;
+                mainVideo.onerror = function() {
+                    this.hidden = true;
+                    mainImage.hidden = false;
+                    mainImage.src = PRODUCT_IMAGE_PLACEHOLDER;
+                };
+                if (mainVideo.src !== activeImage) {
+                    mainVideo.src = activeImage;
+                    mainVideo.load();
+                }
+            } else {
+                mainVideo.pause();
+                mainVideo.hidden = true;
+                if (mainVideo.hasAttribute('src')) {
+                    mainVideo.removeAttribute('src');
+                    mainVideo.load();
+                }
+                mainImage.hidden = false;
+                mainImage.onerror = function() {
+                    this.onerror = null;
+                    this.src = PRODUCT_IMAGE_PLACEHOLDER;
+                    syncModalZoomImage(PRODUCT_IMAGE_PLACEHOLDER);
+                };
+                mainImage.src = activeImage;
+                syncModalZoomImage(activeImage);
+            }
             document.getElementById('modalImageCount').textContent = imageCount ?
                 `${currentModalImageIndex + 1} / ${imageCount}` : 'No Image';
             document.getElementById('modalPrevImage').disabled = imageCount <= 1;
@@ -6701,23 +6775,34 @@
             for (let index = 0; index < imageCount; index++) {
                 const button = document.createElement('button');
                 button.type = 'button';
-                button.className = `modal-thumb ${index === currentModalImageIndex ? 'active' : ''}`;
-                button.setAttribute('aria-label', `View product image ${index + 1}`);
+                const mediaUrl = currentModalImages[index];
+                const isVideo = isProductVideoUrl(mediaUrl);
+                button.className = `modal-thumb ${isVideo ? 'video-thumb' : ''} ${index === currentModalImageIndex ? 'active' : ''}`;
+                button.setAttribute('aria-label', `View product ${isVideo ? 'video' : 'image'} ${index + 1}`);
                 button.onclick = () => selectModalImage(index);
-                const image = document.createElement('img');
-                image.src = currentModalImages[index];
-                image.alt = `${currentProduct ? currentProduct.name : 'Product'} image ${index + 1}`;
-                image.onerror = function() {
-                    this.onerror = null;
-                    this.src = PRODUCT_IMAGE_PLACEHOLDER;
-                };
-                button.appendChild(image);
+                if (isVideo) {
+                    const video = document.createElement('video');
+                    video.src = mediaUrl;
+                    video.muted = true;
+                    video.preload = 'metadata';
+                    video.playsInline = true;
+                    button.appendChild(video);
+                } else {
+                    const image = document.createElement('img');
+                    image.src = mediaUrl;
+                    image.alt = `${currentProduct ? currentProduct.name : 'Product'} image ${index + 1}`;
+                    image.onerror = function() {
+                        this.onerror = null;
+                        this.src = PRODUCT_IMAGE_PLACEHOLDER;
+                    };
+                    button.appendChild(image);
+                }
                 thumbnails.appendChild(button);
 
                 const dot = document.createElement('button');
                 dot.type = 'button';
                 dot.className = `modal-image-dot ${index === currentModalImageIndex ? 'active' : ''}`;
-                dot.setAttribute('aria-label', `View product image ${index + 1}`);
+                dot.setAttribute('aria-label', `View product ${isVideo ? 'video' : 'image'} ${index + 1}`);
                 dot.setAttribute('aria-current', index === currentModalImageIndex ? 'true' : 'false');
                 dot.onclick = () => selectModalImage(index);
                 dots.appendChild(dot);
@@ -6730,6 +6815,11 @@
 
         function animateModalImageTo(index, direction) {
             if (modalImageAnimating || index === currentModalImageIndex) return;
+            if (isProductVideoUrl(currentModalImages[currentModalImageIndex]) || isProductVideoUrl(currentModalImages[index])) {
+                currentModalImageIndex = index;
+                renderModalGallery();
+                return;
+            }
             const mainImage = document.getElementById('modalImage');
             modalImageAnimating = true;
             mainImage.classList.remove('is-dragging');
@@ -6793,7 +6883,8 @@
         }
 
         modalSwipeArea?.addEventListener('touchstart', event => {
-            if (!isMobileProductGallery() || currentModalImages.length <= 1 || modalImageAnimating) return;
+            if (!isMobileProductGallery() || currentModalImages.length <= 1 || modalImageAnimating ||
+                isProductVideoUrl(currentModalImages[currentModalImageIndex])) return;
             const touch = event.changedTouches[0];
             modalSwipeStartX = touch.clientX;
             modalSwipeStartY = touch.clientY;
@@ -7469,6 +7560,10 @@
 
         function closeModal() {
             hideModalImageZoom();
+            const modalVideo = document.getElementById('modalVideo');
+            modalVideo?.pause();
+            modalVideo?.removeAttribute('src');
+            modalVideo?.load();
             document.getElementById('productModal').classList.remove('active');
             document.body.style.overflow = '';
             currentProduct = null;
@@ -8238,7 +8333,7 @@
             storeId: product?.store_id || cartStoreId,
             name: product?.name || 'Product',
             price: Number(product?.price || 0),
-            image: images[0] || PRODUCT_IMAGE_PLACEHOLDER,
+            image: firstProductImageUrl(images) || PRODUCT_IMAGE_PLACEHOLDER,
             availability: product?.availability || 'in_stock',
             stock: Number(product?.stock_quantity || 0),
             quantity: Number(row.quantity || 1)
