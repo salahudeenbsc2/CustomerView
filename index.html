@@ -10809,6 +10809,8 @@
 (function () {
     const BANNER_POSITION = 'Home Page – Header Below';
     const BANNER_INTERVAL = 5000;
+    // Reuse the exact Supabase client initialized by the Customer Portal.
+    const bannerSupabase = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
     let banners = [];
     let currentIndex = 0;
     let timer = null;
@@ -10944,25 +10946,34 @@
         const errorBox = el('customerBannerError');
         if (loading) { loading.hidden = false; loading.textContent = 'Loading offers...'; }
         try {
-            const now = new Date().toISOString();
-            const { data, error } = await supabaseClient
+            if (!bannerSupabase) throw new Error('Customer Portal Supabase client not found.');
+            // Fetch active rows first; filter dates/position in JS so dash/spacing differences
+            // in the saved banner position do not hide a valid banner.
+            const { data, error } = await bannerSupabase
                 .from('banners')
-                .select('id,store_id,is_global,banner_title,banner_subtitle,offer_text,desktop_banner_image,mobile_banner_image,button_text,link_type,link_destination,banner_position,start_date,end_date,display_order,status')
-                .eq('status', 'Active')
-                .eq('banner_position', BANNER_POSITION)
-                .lte('start_date', now)
-                .gte('end_date', now)
+                .select('id,store_id,is_global,banner_title,banner_subtitle,offer_text,desktop_banner_image,mobile_banner_image,button_text,link_type,link_destination,banner_position,start_date,end_date,display_order,status,created_at')
+                .ilike('status', 'active')
                 .order('display_order', { ascending: true })
                 .order('created_at', { ascending: false });
             if (error) throw error;
-            banners = (data || []).filter(isActiveBanner).filter(row => getBannerImage(row));
+            const normalizePosition = value => String(value || '').toLowerCase()
+                .replace(/[–—-]/g, ' ').replace(/\s+/g, ' ').trim();
+            const wantedPosition = normalizePosition(BANNER_POSITION);
+            banners = (data || [])
+                .filter(isActiveBanner)
+                .filter(row => {
+                    const position = normalizePosition(row.banner_position);
+                    return !position || position === wantedPosition || position.includes('header below');
+                })
+                .filter(row => getBannerImage(row));
             currentIndex = 0;
             renderBanners();
+            if (errorBox) errorBox.style.display = 'none';
         } catch (error) {
             banners = [];
             renderBanners();
             if (errorBox) {
-                errorBox.textContent = 'Banner load failed. Supabase banners table / RLS policy check pannunga.';
+                errorBox.textContent = 'Banner load failed: ' + (error?.message || 'Supabase banners table / RLS policy check pannunga.');
                 errorBox.style.display = 'block';
             }
             console.error('Customer banner load failed:', error);
@@ -10971,7 +10982,8 @@
 
     function subscribeCustomerBanners() {
         if (channel) return;
-        channel = supabaseClient
+        if (!bannerSupabase) return;
+        channel = bannerSupabase
             .channel('customer-banner-sync')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'banners' }, () => {
                 clearTimeout(window.__customerBannerReloadTimer);
