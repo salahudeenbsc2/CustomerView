@@ -4092,7 +4092,25 @@
             from { opacity: 0; }
             to { opacity: 1; }
         }
-    </style>
+    
+
+    /* Supabase promotional banner styles */
+    .customer-banner-section{width:100%;margin:0 0 22px;position:relative}
+    .customer-banner-slider{position:relative;width:100%;overflow:hidden;border-radius:16px;background:#f3f4f6;min-height:220px;box-shadow:0 6px 22px rgba(15,23,42,.08)}
+    .customer-banner-slide{display:none;position:relative;width:100%;cursor:pointer}
+    .customer-banner-slide.active{display:block}
+    .customer-banner-slide picture,.customer-banner-slide img{display:block;width:100%;height:auto}
+    .customer-banner-slide img{min-height:220px;object-fit:cover}
+    .customer-banner-placeholder{min-height:220px;display:grid;place-items:center;color:#64748b;padding:30px;text-align:center}
+    .customer-banner-nav{position:absolute;top:50%;transform:translateY(-50%);z-index:3;border:0;width:42px;height:42px;border-radius:50%;background:rgba(255,255,255,.9);box-shadow:0 3px 12px rgba(0,0,0,.14);cursor:pointer;font-size:16px}
+    .customer-banner-nav.prev{left:14px}.customer-banner-nav.next{right:14px}
+    .customer-banner-dots{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);display:flex;gap:7px;z-index:4}
+    .customer-banner-dot{width:9px;height:9px;border-radius:50%;border:0;padding:0;background:rgba(255,255,255,.65);cursor:pointer}
+    .customer-banner-dot.active{background:#e8511b;transform:scale(1.2)}
+    .customer-banner-error{display:none;padding:18px;border-radius:12px;background:#fff7ed;color:#9a3412;font-size:14px}
+    @media(max-width:700px){.customer-banner-slider,.customer-banner-placeholder{min-height:180px}.customer-banner-slide img{min-height:180px}.customer-banner-nav{width:36px;height:36px}.customer-banner-nav.prev{left:8px}.customer-banner-nav.next{right:8px}}
+
+</style>
     <!-- Supabase JavaScript client -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script>
@@ -5490,6 +5508,15 @@
     <div class="container">
         <div class="content-area">
             <div class="view-products" id="viewProducts">
+                <section class="customer-banner-section" id="customerBannerSection" aria-label="Promotional banners">
+                    <div class="customer-banner-slider" id="customerBannerSlider">
+                        <div class="customer-banner-placeholder" id="customerBannerLoading">Loading offers...</div>
+                        <button type="button" class="customer-banner-nav prev" id="customerBannerPrev" onclick="customerBannerPrev(event)" aria-label="Previous banner" hidden><i class="fas fa-chevron-left"></i></button>
+                        <button type="button" class="customer-banner-nav next" id="customerBannerNext" onclick="customerBannerNext(event)" aria-label="Next banner" hidden><i class="fas fa-chevron-right"></i></button>
+                        <div class="customer-banner-dots" id="customerBannerDots"></div>
+                    </div>
+                    <div class="customer-banner-error" id="customerBannerError"></div>
+                </section>
                 <div class="horizontal-scroll-wrapper"><div class="product-horizontal" id="productHorizontal"></div></div>
             </div>
 
@@ -10833,5 +10860,215 @@
 })();
 </script>
 
+<script id="favlor-customer-banner-supabase-sync">
+// ===== SUPABASE CUSTOMER BANNER SYNC =====
+(function () {
+    const BANNER_POSITION = 'Home Page – Header Below';
+    const BANNER_INTERVAL = 5000;
+    // Reuse the exact Supabase client initialized by the Customer Portal.
+    const bannerSupabase = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
+    let banners = [];
+    let currentIndex = 0;
+    let timer = null;
+    let channel = null;
+
+    const el = id => document.getElementById(id);
+
+    function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    }
+
+    function normalizeStatus(value) {
+        return String(value || '').trim().toLowerCase();
+    }
+
+    function isActiveBanner(row) {
+        if (normalizeStatus(row.status) !== 'active') return false;
+        const now = Date.now();
+        const start = row.start_date ? new Date(row.start_date).getTime() : 0;
+        const end = row.end_date ? new Date(row.end_date).getTime() : 0;
+        if (start && Number.isNaN(start)) return false;
+        if (end && Number.isNaN(end)) return false;
+        return (!start || now >= start) && (!end || now <= end);
+    }
+
+    function getBannerImage(row) {
+        return row.desktop_banner_image || row.mobile_banner_image || '';
+    }
+
+    function openBannerDestination(row) {
+        const type = String(row.link_type || 'no_link').toLowerCase().replace(/[\s-]+/g, '_');
+        const destination = String(row.link_destination || '').trim();
+        if (!destination || type === 'no_link') return;
+
+        if (type === 'custom_url') {
+            try {
+                const url = new URL(destination, window.location.href);
+                if (url.protocol === 'http:' || url.protocol === 'https:') window.location.href = url.href;
+            } catch (_) {}
+            return;
+        }
+
+        // Product / Category / Brand / Coupon destinations use the existing portal search/navigation.
+        if (type === 'product' && typeof window.openProductById === 'function') {
+            window.openProductById(destination);
+            return;
+        }
+        if (type === 'category' && typeof window.switchView === 'function') {
+            window.switchView('products');
+            const search = el('searchInputTop');
+            if (search) { search.value = destination; search.dispatchEvent(new Event('input', {bubbles:true})); }
+            return;
+        }
+        if (type === 'brand' && typeof window.switchView === 'function') {
+            window.switchView('products');
+            const search = el('searchInputTop');
+            if (search) { search.value = destination; search.dispatchEvent(new Event('input', {bubbles:true})); }
+            return;
+        }
+        if (type === 'coupon') {
+            window.switchView?.('products');
+            return;
+        }
+    }
+
+    function renderBanners() {
+        const slider = el('customerBannerSlider');
+        const loading = el('customerBannerLoading');
+        const dots = el('customerBannerDots');
+        const prev = el('customerBannerPrev');
+        const next = el('customerBannerNext');
+        const error = el('customerBannerError');
+        if (!slider || !loading || !dots) return;
+
+        clearInterval(timer);
+        timer = null;
+        error.style.display = 'none';
+        dots.innerHTML = '';
+        slider.querySelectorAll('.customer-banner-slide').forEach(node => node.remove());
+
+        if (!banners.length) {
+            loading.hidden = true;
+            prev.hidden = true; next.hidden = true;
+            const section = el('customerBannerSection');
+            if (section) section.style.display = 'none';
+            return;
+        }
+
+        const section = el('customerBannerSection');
+        if (section) section.style.display = '';
+        loading.hidden = true;
+        banners.forEach((banner, index) => {
+            const slide = document.createElement('div');
+            slide.className = 'customer-banner-slide' + (index === currentIndex ? ' active' : '');
+            slide.dataset.index = String(index);
+            slide.setAttribute('role', 'button');
+            slide.tabIndex = 0;
+            slide.title = banner.banner_title || 'Promotion';
+            slide.innerHTML = `
+                <picture>
+                    <source media="(max-width: 700px)" srcset="${escapeHtml(banner.mobile_banner_image || banner.desktop_banner_image || '')}">
+                    <img src="${escapeHtml(banner.desktop_banner_image || banner.mobile_banner_image || '')}" alt="${escapeHtml(banner.banner_title || 'Promotion banner')}" loading="${index === 0 ? 'eager' : 'lazy'}">
+                </picture>`;
+            slide.addEventListener('click', () => openBannerDestination(banner));
+            slide.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openBannerDestination(banner); } });
+            slider.insertBefore(slide, prev);
+
+            const dot = document.createElement('button');
+            dot.type = 'button';
+            dot.className = 'customer-banner-dot' + (index === currentIndex ? ' active' : '');
+            dot.setAttribute('aria-label', `Show banner ${index + 1}`);
+            dot.addEventListener('click', event => { event.stopPropagation(); showBanner(index); });
+            dots.appendChild(dot);
+        });
+
+        const multiple = banners.length > 1;
+        prev.hidden = !multiple;
+        next.hidden = !multiple;
+        if (multiple) timer = setInterval(() => showBanner((currentIndex + 1) % banners.length), BANNER_INTERVAL);
+    }
+
+    function showBanner(index) {
+        if (!banners.length) return;
+        currentIndex = (index + banners.length) % banners.length;
+        el('customerBannerSlider')?.querySelectorAll('.customer-banner-slide').forEach((slide, i) => slide.classList.toggle('active', i === currentIndex));
+        el('customerBannerDots')?.querySelectorAll('.customer-banner-dot').forEach((dot, i) => dot.classList.toggle('active', i === currentIndex));
+        clearInterval(timer);
+        if (banners.length > 1) timer = setInterval(() => showBanner((currentIndex + 1) % banners.length), BANNER_INTERVAL);
+    }
+
+    window.customerBannerPrev = function (event) { event?.stopPropagation(); showBanner(currentIndex - 1); };
+    window.customerBannerNext = function (event) { event?.stopPropagation(); showBanner(currentIndex + 1); };
+
+    window.loadCustomerBanners = async function () {
+        const loading = el('customerBannerLoading');
+        const errorBox = el('customerBannerError');
+        if (loading) { loading.hidden = false; loading.textContent = 'Loading offers...'; }
+        try {
+            if (!bannerSupabase) throw new Error('Customer Portal Supabase client not found. Check that the Customer Portal initializes the shared Supabase client before the banner script.');
+            // Fetch active rows first; filter dates/position in JS so dash/spacing differences
+            // in the saved banner position do not hide a valid banner.
+            const { data, error } = await bannerSupabase
+                .from('banners')
+                .select('id,store_id,is_global,banner_title,banner_subtitle,offer_text,desktop_banner_image,mobile_banner_image,button_text,link_type,link_destination,banner_position,start_date,end_date,display_order,status,created_at')
+                .order('display_order', { ascending: true })
+                .order('created_at', { ascending: false });
+            if (error) throw error;
+            const normalizePosition = value => String(value || '').toLowerCase()
+                .replace(/[–—-]/g, ' ').replace(/\s+/g, ' ').trim();
+            const wantedPosition = normalizePosition(BANNER_POSITION);
+            const activeWithImages = (data || [])
+                .filter(isActiveBanner)
+                .filter(row => getBannerImage(row));
+            // Home page banner positions can vary (Header Below / Products Above / Products Middle).
+            // Prefer homepage banners, but accept blank position for older rows.
+            const homeBanners = activeWithImages.filter(row => {
+                const position = normalizePosition(row.banner_position);
+                return !position || position.includes('home page') || position === wantedPosition;
+            });
+            banners = homeBanners;
+            // If the data contains active banners but an older/custom position label, do not silently
+            // leave the customer page blank: show those banners as a compatibility fallback.
+            if (!banners.length && activeWithImages.length) banners = activeWithImages;
+            currentIndex = 0;
+            renderBanners();
+            if (errorBox) errorBox.style.display = 'none';
+        } catch (error) {
+            banners = [];
+            renderBanners();
+            const section = el('customerBannerSection');
+            if (section) section.style.display = '';
+            if (errorBox) {
+                errorBox.textContent = 'Promotional banners could not load. Check the Supabase banners table, public SELECT/RLS policy, image URLs, and browser console. Details: ' + (error?.message || 'Unknown error');
+                errorBox.style.display = 'block';
+            }
+            console.error('Customer banner load failed:', error);
+        }
+    };
+
+    function subscribeCustomerBanners() {
+        if (channel) return;
+        if (!bannerSupabase) return;
+        channel = bannerSupabase
+            .channel('customer-banner-sync')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'banners' }, () => {
+                clearTimeout(window.__customerBannerReloadTimer);
+                window.__customerBannerReloadTimer = setTimeout(() => window.loadCustomerBanners(), 250);
+            })
+            .subscribe(status => {
+                if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') console.warn('Customer banner Realtime unavailable.');
+            });
+    }
+
+    function start() {
+        window.loadCustomerBanners();
+        subscribeCustomerBanners();
+    }
+
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+    else start();
+    window.addEventListener('focus', () => window.loadCustomerBanners());
+})();
+</script>
 </body>
 </html>
