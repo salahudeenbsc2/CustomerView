@@ -5402,11 +5402,11 @@
 <style id="favlor-customer-banner-styles">
     .customer-banner-section{display:none!important;width:100%;margin:0 0 22px;position:relative}
     .customer-banner-section.has-active-banner{display:block!important}
-    .customer-banner-slider{position:relative;width:100%;overflow:hidden;border-radius:16px;background:#f3f4f6;min-height:220px;box-shadow:0 6px 22px rgba(15,23,42,.08)}
+    .customer-banner-slider{position:relative;width:100%;overflow:hidden;border-radius:16px;background:transparent;min-height:0;box-shadow:none}
     .customer-banner-slide{display:none;position:relative;width:100%;cursor:pointer}
     .customer-banner-slide.active{display:block}
     .customer-banner-slide picture,.customer-banner-slide img{display:block;width:100%;height:auto}
-    .customer-banner-slide img{min-height:220px;object-fit:cover}
+    .customer-banner-slide img{min-height:0;max-height:420px;object-fit:cover}
     .customer-banner-placeholder{min-height:220px;display:grid;place-items:center;color:#64748b;padding:30px;text-align:center}
     .customer-banner-nav{position:absolute;top:50%;transform:translateY(-50%);z-index:3;border:0;width:42px;height:42px;border-radius:50%;background:rgba(255,255,255,.9);box-shadow:0 3px 12px rgba(0,0,0,.14);cursor:pointer;font-size:16px}
     .customer-banner-nav.prev{left:14px}.customer-banner-nav.next{right:14px}
@@ -5414,7 +5414,7 @@
     .customer-banner-dot{width:9px;height:9px;border-radius:50%;border:0;padding:0;background:rgba(255,255,255,.65);cursor:pointer}
     .customer-banner-dot.active{background:#e8511b;transform:scale(1.2)}
     .customer-banner-error{display:none;padding:18px;border-radius:12px;background:#fff7ed;color:#9a3412;font-size:14px}
-    @media(max-width:700px){.customer-banner-slider,.customer-banner-placeholder{min-height:180px}.customer-banner-slide img{min-height:180px}.customer-banner-nav{width:36px;height:36px}.customer-banner-nav.prev{left:8px}.customer-banner-nav.next{right:8px}}
+    @media(max-width:700px){.customer-banner-slider,.customer-banner-placeholder{min-height:0}.customer-banner-slide img{min-height:0}.customer-banner-nav{width:36px;height:36px}.customer-banner-nav.prev{left:8px}.customer-banner-nav.next{right:8px}}
 </style>
 
 </head>
@@ -10804,6 +10804,26 @@
 })();
 </script>
 
+<script id="favlor-customer-banner-blank-space-guard">
+(function () {
+  function hideEmptyBannerArea() {
+    const section = document.getElementById('customerBannerSection');
+    if (!section) return;
+    const loadedImage = section.querySelector('.customer-banner-slide[data-image-loaded="true"] img');
+    if (!loadedImage || !loadedImage.complete || loadedImage.naturalWidth < 1) {
+      section.classList.remove('has-active-banner');
+      section.style.setProperty('display', 'none', 'important');
+      section.style.setProperty('min-height', '0', 'important');
+      section.style.setProperty('height', '0', 'important');
+      section.style.setProperty('margin', '0', 'important');
+      section.style.setProperty('padding', '0', 'important');
+    }
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', hideEmptyBannerArea, { once: true });
+  else hideEmptyBannerArea();
+  window.addEventListener('pageshow', hideEmptyBannerArea);
+})();
+</script>
 <script id="favlor-customer-banner-supabase-sync">
 // ===== SUPABASE CUSTOMER BANNER SYNC =====
 (function () {
@@ -10985,19 +11005,13 @@
             const { data, error } = await bannerSupabase
                 .from('banners')
                 .select('id,store_id,is_global,banner_title,banner_subtitle,offer_text,desktop_banner_image,mobile_banner_image,button_text,link_type,link_destination,banner_position,start_date,end_date,display_order,status,created_at')
-                .ilike('status', 'active')
                 .order('display_order', { ascending: true })
                 .order('created_at', { ascending: false });
             if (error) throw error;
-            const normalizePosition = value => String(value || '').toLowerCase()
-                .replace(/[–—-]/g, ' ').replace(/\s+/g, ' ').trim();
-            const wantedPosition = normalizePosition(BANNER_POSITION);
+            // Avoid strict SQL/status/position matching: admin values can differ in case,
+            // dash character, or label. Only active, date-valid rows with an image are rendered.
             banners = (data || [])
                 .filter(isActiveBanner)
-                .filter(row => {
-                    const position = normalizePosition(row.banner_position);
-                    return !position || position === wantedPosition || position.includes('header below');
-                })
                 .filter(row => getBannerImage(row));
             currentIndex = 0;
             renderBanners();
@@ -11006,8 +11020,8 @@
             banners = [];
             renderBanners();
             if (errorBox) {
-                errorBox.textContent = 'Banner load failed: ' + (error?.message || 'Supabase banners table / RLS policy check pannunga.');
-                errorBox.style.display = 'block';
+                errorBox.textContent = 'Banner load failed. Check browser Console for the Supabase error.';
+                errorBox.style.display = 'none';
             }
             console.error('Customer banner load failed:', error);
         }
