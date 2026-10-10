@@ -5397,6 +5397,8 @@
             SUPABASE_URL,
             SUPABASE_PUBLISHABLE_KEY
         );
+        // Share the existing client with the isolated banner module.
+        window.__favlorCustomerSupabase = supabaseClient;
     </script>
 
 <style id="favlor-customer-banner-styles">
@@ -10809,10 +10811,9 @@
 <script id="favlor-customer-banner-supabase-sync">
 // ===== SUPABASE CUSTOMER BANNER SYNC =====
 (function () {
-    const BANNER_POSITION = 'Home Page – Header Below';
     const BANNER_INTERVAL = 5000;
     // Reuse the exact Supabase client initialized by the Customer Portal.
-    const bannerSupabase = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
+    const bannerSupabase = window.__favlorCustomerSupabase || window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
     let banners = [];
     let currentIndex = 0;
     let timer = null;
@@ -10915,6 +10916,15 @@
                     <source media="(max-width: 700px)" srcset="${escapeHtml(banner.mobile_banner_image || banner.desktop_banner_image || '')}">
                     <img src="${escapeHtml(banner.desktop_banner_image || banner.mobile_banner_image || '')}" alt="${escapeHtml(banner.banner_title || 'Promotion banner')}" loading="${index === 0 ? 'eager' : 'lazy'}">
                 </picture>`;
+            const bannerImg = slide.querySelector('img');
+            bannerImg?.addEventListener('error', () => {
+                slide.remove();
+                const remaining = slider.querySelectorAll('.customer-banner-slide');
+                if (!remaining.length) {
+                    banners = [];
+                    if (section) section.classList.add('is-empty');
+                }
+            }, { once: true });
             slide.addEventListener('click', () => openBannerDestination(banner));
             slide.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openBannerDestination(banner); } });
             slider.insertBefore(slide, prev);
@@ -10959,15 +10969,10 @@
                 .order('display_order', { ascending: true })
                 .order('created_at', { ascending: false });
             if (error) throw error;
-            const normalizePosition = value => String(value || '').toLowerCase()
-                .replace(/[–—-]/g, ' ').replace(/\s+/g, ' ').trim();
-            const wantedPosition = normalizePosition(BANNER_POSITION);
+            // Display any currently active, in-date banner with an image. Do not
+            // reject a valid banner because its position label differs in wording.
             banners = (data || [])
                 .filter(isActiveBanner)
-                .filter(row => {
-                    const position = normalizePosition(row.banner_position);
-                    return !position || position === wantedPosition || position.includes('header below');
-                })
                 .filter(row => getBannerImage(row));
             currentIndex = 0;
             renderBanners();
