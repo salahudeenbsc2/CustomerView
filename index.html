@@ -5400,7 +5400,8 @@
     </script>
 
 <style id="favlor-customer-banner-styles">
-    .customer-banner-section{display:none;width:100%;margin:0 0 22px;position:relative}
+    .customer-banner-section{display:none!important;width:100%;margin:0 0 22px;position:relative}
+    .customer-banner-section.has-active-banner{display:block!important}
     .customer-banner-slider{position:relative;width:100%;overflow:hidden;border-radius:16px;background:#f3f4f6;min-height:220px;box-shadow:0 6px 22px rgba(15,23,42,.08)}
     .customer-banner-slide{display:none;position:relative;width:100%;cursor:pointer}
     .customer-banner-slide.active{display:block}
@@ -5507,7 +5508,7 @@
         <div class="content-area">
             <div class="view-products" id="viewProducts">
 
-                <section class="customer-banner-section" id="customerBannerSection" aria-label="Promotional banners">
+                <section class="customer-banner-section" id="customerBannerSection" aria-label="Promotional banners" style="display:none">
                     <div class="customer-banner-slider" id="customerBannerSlider">
                         <button type="button" class="customer-banner-nav prev" id="customerBannerPrev" onclick="customerBannerPrev(event)" aria-label="Previous banner" hidden><i class="fas fa-chevron-left"></i></button>
                         <button type="button" class="customer-banner-nav next" id="customerBannerNext" onclick="customerBannerNext(event)" aria-label="Next banner" hidden><i class="fas fa-chevron-right"></i></button>
@@ -10893,14 +10894,15 @@
         if (!banners.length) {
             loading.hidden = true;
             const section = el('customerBannerSection');
-            if (section) section.style.display = 'none';
+            if (section) { section.classList.remove('has-active-banner'); section.style.display = 'none'; }
             if (prev) prev.hidden = true;
             if (next) next.hidden = true;
             return;
         }
 
         const section = el('customerBannerSection');
-        if (section) section.style.display = 'block';
+        // Keep the whole banner area hidden until a real banner image successfully loads.
+        if (section) { section.classList.remove('has-active-banner'); section.style.display = 'none'; }
         loading.hidden = true;
         banners.forEach((banner, index) => {
             const slide = document.createElement('div');
@@ -10924,9 +10926,37 @@
             dot.setAttribute('aria-label', `Show banner ${index + 1}`);
             dot.addEventListener('click', event => { event.stopPropagation(); showBanner(index); });
             dots.appendChild(dot);
+
+            const bannerImage = slide.querySelector('img');
+            if (bannerImage) {
+                const revealBanner = () => {
+                    slide.dataset.imageLoaded = 'true';
+                    const section = el('customerBannerSection');
+                    if (section) {
+                        section.classList.add('has-active-banner');
+                        section.style.display = 'block';
+                    }
+                };
+                bannerImage.addEventListener('load', revealBanner, { once: true });
+                if (bannerImage.complete && bannerImage.naturalWidth > 0) revealBanner();
+                bannerImage.addEventListener('error', () => {
+                    slide.remove();
+                    dot.remove();
+                    const remainingLoaded = slider.querySelector('.customer-banner-slide[data-image-loaded="true"]');
+                    const remainingSlides = slider.querySelectorAll('.customer-banner-slide');
+                    if (!remainingLoaded && !remainingSlides.length) {
+                        const section = el('customerBannerSection');
+                        if (section) { section.classList.remove('has-active-banner'); section.style.display = 'none'; }
+                    } else if (!remainingLoaded && remainingSlides.length) {
+                        // Keep the area hidden until one of the remaining images loads successfully.
+                        const section = el('customerBannerSection');
+                        if (section) section.style.display = 'none';
+                    }
+                }, { once: true });
+            }
         });
 
-        const multiple = banners.length > 1;
+        const multiple = slider.querySelectorAll('.customer-banner-slide').length > 1;
         prev.hidden = !multiple;
         next.hidden = !multiple;
         if (multiple) timer = setInterval(() => showBanner((currentIndex + 1) % banners.length), BANNER_INTERVAL);
