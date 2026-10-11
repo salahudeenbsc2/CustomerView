@@ -5400,20 +5400,20 @@
     </script>
 
 <style id="favlor-customer-banner-styles">
-    .customer-banner-section{width:100%;margin:0 0 22px;position:relative}
-    .customer-banner-slider{position:relative;width:100%;overflow:hidden;border-radius:16px;background:#f3f4f6;min-height:220px;box-shadow:0 6px 22px rgba(15,23,42,.08)}
+    .customer-banner-section{width:100%;margin:0 0 22px;position:relative}.customer-banner-section[hidden]{display:none!important}
+    .customer-banner-slider{position:relative;width:100%;overflow:hidden;border-radius:16px;background:transparent;min-height:0;box-shadow:none}
     .customer-banner-slide{display:none;position:relative;width:100%;cursor:pointer}
     .customer-banner-slide.active{display:block}
     .customer-banner-slide picture,.customer-banner-slide img{display:block;width:100%;height:auto}
-    .customer-banner-slide img{min-height:220px;object-fit:cover}
-    .customer-banner-placeholder{min-height:220px;display:grid;place-items:center;color:#64748b;padding:30px;text-align:center}
+    .customer-banner-slide img{min-height:0;object-fit:cover}
+    .customer-banner-placeholder{display:none!important}
     .customer-banner-nav{position:absolute;top:50%;transform:translateY(-50%);z-index:3;border:0;width:42px;height:42px;border-radius:50%;background:rgba(255,255,255,.9);box-shadow:0 3px 12px rgba(0,0,0,.14);cursor:pointer;font-size:16px}
     .customer-banner-nav.prev{left:14px}.customer-banner-nav.next{right:14px}
     .customer-banner-dots{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);display:flex;gap:7px;z-index:4}
     .customer-banner-dot{width:9px;height:9px;border-radius:50%;border:0;padding:0;background:rgba(255,255,255,.65);cursor:pointer}
     .customer-banner-dot.active{background:#e8511b;transform:scale(1.2)}
     .customer-banner-error{display:none;padding:18px;border-radius:12px;background:#fff7ed;color:#9a3412;font-size:14px}
-    @media(max-width:700px){.customer-banner-slider,.customer-banner-placeholder{min-height:180px}.customer-banner-slide img{min-height:180px}.customer-banner-nav{width:36px;height:36px}.customer-banner-nav.prev{left:8px}.customer-banner-nav.next{right:8px}}
+    @media(max-width:700px){.customer-banner-slider,.customer-banner-placeholder{min-height:0}.customer-banner-slide img{min-height:0}.customer-banner-nav{width:36px;height:36px}.customer-banner-nav.prev{left:8px}.customer-banner-nav.next{right:8px}}
 </style>
 
 </head>
@@ -5507,10 +5507,9 @@
         <div class="content-area">
             <div class="view-products" id="viewProducts">
 
-                <section class="customer-banner-section" id="customerBannerSection" aria-label="Promotional banners">
+                <section class="customer-banner-section" id="customerBannerSection" aria-label="Promotional banners" hidden>
                     <div class="customer-banner-slider" id="customerBannerSlider">
-                        <div class="customer-banner-placeholder" id="customerBannerLoading">Loading offers...</div>
-                        <button type="button" class="customer-banner-nav prev" id="customerBannerPrev" onclick="customerBannerPrev(event)" aria-label="Previous banner" hidden><i class="fas fa-chevron-left"></i></button>
+<button type="button" class="customer-banner-nav prev" id="customerBannerPrev" onclick="customerBannerPrev(event)" aria-label="Previous banner" hidden><i class="fas fa-chevron-left"></i></button>
                         <button type="button" class="customer-banner-nav next" id="customerBannerNext" onclick="customerBannerNext(event)" aria-label="Next banner" hidden><i class="fas fa-chevron-right"></i></button>
                         <div class="customer-banner-dots" id="customerBannerDots"></div>
                     </div>
@@ -10924,12 +10923,12 @@
 
     function renderBanners() {
         const slider = el('customerBannerSlider');
-        const loading = el('customerBannerLoading');
+        const section = el('customerBannerSection');
         const dots = el('customerBannerDots');
         const prev = el('customerBannerPrev');
         const next = el('customerBannerNext');
         const error = el('customerBannerError');
-        if (!slider || !loading || !dots) return;
+        if (!slider || !dots) return;
 
         clearInterval(timer);
         timer = null;
@@ -10938,13 +10937,13 @@
         slider.querySelectorAll('.customer-banner-slide').forEach(node => node.remove());
 
         if (!banners.length) {
-            loading.hidden = false;
-            loading.textContent = 'No active offers available.';
-            prev.hidden = true; next.hidden = true;
+            if (section) section.hidden = true;
+            if (prev) prev.hidden = true;
+            if (next) next.hidden = true;
             return;
         }
 
-        loading.hidden = true;
+        if (section) section.hidden = false;
         banners.forEach((banner, index) => {
             const slide = document.createElement('div');
             slide.className = 'customer-banner-slide' + (index === currentIndex ? ' active' : '');
@@ -10988,9 +10987,10 @@
     window.customerBannerNext = function (event) { event?.stopPropagation(); showBanner(currentIndex + 1); };
 
     window.loadCustomerBanners = async function () {
-        const loading = el('customerBannerLoading');
+        const section = el('customerBannerSection');
         const errorBox = el('customerBannerError');
-        if (loading) { loading.hidden = false; loading.textContent = 'Loading offers...'; }
+        // Keep the banner area hidden while loading; never show a placeholder box.
+        if (section) section.hidden = true;
         try {
             if (!bannerSupabase) throw new Error('Customer Portal Supabase client not found.');
             // Fetch active rows first; filter dates/position in JS so dash/spacing differences
