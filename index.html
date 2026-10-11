@@ -9003,13 +9003,13 @@
         }
 
         function openModal(product, historyOptions = {}) {
-            // Make product details participate in the browser Back/Forward buttons.
-            // A popstate restore passes fromHistory=true to avoid adding another entry.
+            // Add product details to browser history so Back returns to this portal
+            // and Forward can reopen the same product.
             if (product && !historyOptions.fromHistory) {
                 const currentState = window.history.state || {};
                 if (String(currentState.favlorProductId || '') !== String(product.id)) {
                     window.history.pushState(
-                        { ...currentState, favlorProductId: String(product.id) },
+                        { ...currentState, favlorPortalHome: true, favlorProductId: String(product.id) },
                         document.title,
                         window.location.href
                     );
@@ -9059,7 +9059,8 @@
         }
 
         function closeModal(historyOptions = {}) {
-            // Manual close returns to the product-list history entry.
+            // If the product details have their own history entry, navigate back
+            // to the portal home rather than leaving the website.
             if (!historyOptions.fromHistory && window.history.state?.favlorProductId) {
                 window.history.back();
                 return;
@@ -9081,7 +9082,19 @@
             selectedProductRating = 0;
         }
 
-        // Browser Back closes product details; Forward reopens the same product.
+        // Mark the current browser entry as the Customer Portal home. This is
+        // essential when the site was opened directly in a fresh tab.
+        (function ensureFavlorPortalBaseHistoryEntry() {
+            const state = window.history.state || {};
+            if (!state.favlorPortalHome || state.favlorProductId) {
+                window.history.replaceState(
+                    { ...state, favlorPortalHome: true, favlorProductId: null },
+                    document.title,
+                    window.location.href
+                );
+            }
+        })();
+
         window.addEventListener('popstate', function(event) {
             const productId = event.state?.favlorProductId;
             if (productId !== undefined && productId !== null && String(productId) !== '') {
@@ -9092,7 +9105,9 @@
                 }
             }
             const modal = document.getElementById('productModal');
-            if (modal?.classList.contains('active')) closeModal({ fromHistory: true });
+            if (modal?.classList.contains('active')) {
+                closeModal({ fromHistory: true });
+            }
         });
 
         async function addToCart() {
